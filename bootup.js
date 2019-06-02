@@ -27,6 +27,31 @@ let EncodeCounter = new TFrameCounter("H264 encodes");
 let H264ByteCounter = new TFrameCounter("H264 bytes");
 let RenderCounter = new TFrameCounter("Render");
 
+var Params = {};
+Params.DepthMin = 10;
+Params.DepthMax = 1000;
+
+Math.clamp = function(min, max,Value)
+{
+	return Math.min( Math.max(Value, min), max);
+}
+
+Math.lerp = function(min, max, Time)
+{
+	return min + ( (max-min) * Time );
+}
+
+Math.range = function(Min,Max,Value)
+{
+	return (Value-Min) / (Max-Min);
+}
+
+Math.rangeClamped = function(Min,Max,Value)
+{
+	return Math.clamp( 0, 1, Math.range( Min, Max, Value ) );
+}
+
+
 
 H264ByteCounter.Report = function(CountPerSec)
 {
@@ -58,6 +83,34 @@ function Render(RenderTarget)
 	RenderTarget.DrawQuad( FragShader, DrawRight_SetUniforms );
 
 	RenderCounter.Add(1);
+}
+
+function GetKinect8Bit(Depth16Image)
+{
+	//Pop.Debug(Depth16Image.GetFormat(),Depth16Image.GetWidth(),Depth16Image.GeHeight());
+	if ( Depth16Image.GetFormat() != 'KinectDepth' )
+		throw "Expected kinect depth, but format is " + Depth16Image.GetFormat();
+
+	const w = Depth16Image.GetWidth();
+	const h = Depth16Image.GetHeight();
+	const Depth16 = Depth16Image.GetPixelBuffer();
+	const Depth8 = new Uint8Array( w*h );
+
+	for ( let i=0;	i<Depth16.length;	i++ )
+	{
+		let Depth = Depth16[i];
+
+		//	normalise
+		let Depthf = Math.rangeClamped( Params.DepthMin, Params.DepthMax, Depth );
+		//Pop.Debug(Depthf);
+		Depth = Math.floor( Depthf * 255 );
+
+		Depth8[i] = Depth;
+	}
+
+	const Depth8Image = new Pop.Image();
+	Depth8Image.WritePixels( w, h, Depth8, 'Greyscale' );
+	return Depth8Image;
 }
 
 function BroadcastH264Packet(Packet)
@@ -120,11 +173,9 @@ async function ProcessKinectFrames(CameraSource)
 			
 			InputCounter.Add(1);
 
-			//InputImage = NextFrame;
+			InputImage = NextFrame;
 			//	convert from kinect to something we can send			
-			let YuvFrame = new Pop.Image();
-			YuvFrame.Copy(NextFrame);
-			YuvFrame.SetFormat('Greyscale');
+			let YuvFrame = GetKinect8Bit(NextFrame);
 			InputImage = YuvFrame;
 			Encoder.Encode( YuvFrame, FrameTime++ );
 			//this.CameraFrameCounter.Add();
