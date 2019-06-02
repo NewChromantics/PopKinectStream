@@ -163,7 +163,7 @@ async function ProcessKinectFrames(CameraSource)
 	{
 		try
 		{
-			await Pop.Yield(20);
+			await Pop.Yield(0);
 			const fb = FrameBuffer;
 			const Stream = 0;
 			const Latest = true;
@@ -178,7 +178,6 @@ async function ProcessKinectFrames(CameraSource)
 			let YuvFrame = GetKinect8Bit(NextFrame);
 			InputImage = YuvFrame;
 			Encoder.Encode( YuvFrame, FrameTime++ );
-			//this.CameraFrameCounter.Add();
 		}
 		catch(e)
 		{
@@ -197,4 +196,98 @@ ProcessEncoding().then(Pop.Debug).catch(Pop.Debug);
 let Window = new Pop.Opengl.Window("Kinect Stream");
 Window.OnRender = Render;
 Window.OnMouseMove = function(){};
+
+
+
+
+
+function CreateParamsWindow(Params,OnAnyChanged)
+{
+	OnAnyChanged = OnAnyChanged || function(){};
+	
+	let WindowRect = [20,20,100,400];
+	let ControlTop = 10;
+	const ControlLeft = 10;
+	const ControlWidth = 400;
+	const ControlHeight = 20;
+	const ControlSpacing = 10;
+
+	let Window = new Pop.Gui.Window("Params");
+	Window.Controls = [];
+	Window.Labels = [];
+
+	let AddSlider = function(Name,Min,Max,CleanValue)
+	{
+		if ( !CleanValue )
+			CleanValue = function(v)	{	return v;	}
+			
+		let Label = new Pop.Gui.Label( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight] );
+		ControlTop += ControlHeight;
+		
+		let Control;
+		if ( typeof Params[Name] === 'boolean' )
+		{
+			Control = new Pop.Gui.TickBox( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight] );
+			Control.SetValue( Params[Name] );
+			
+			Control.OnChanged = function(Value)
+			{
+				Value = CleanValue(Value);
+				Params[Name] = Value;
+				Label.SetValue( Name + ": " + Value );
+				OnAnyChanged(Params);
+			}
+			
+			//	init label
+			Control.OnChanged( Params[Name] );
+		}
+		else
+		{
+			let Slider = new Pop.Gui.Slider( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight] );
+			Slider.SetMinMax( 0, 1000 );
+			let Valuef = Math.range( Min, Max, Params[Name] );
+			let Valuek = Valuef * 1000;
+			Slider.SetValue( Valuek );
+			
+			Slider.OnChanged = function(Valuek)
+			{
+				let Valuef = Valuek/1000;
+				let Value = Math.lerp( Min, Max, Valuef );
+				Value = CleanValue(Value);
+				Params[Name] = Value;
+				Label.SetValue( Name + ": " + Value );
+				
+				OnAnyChanged(Params);
+			}
+			
+			//	init label
+			Slider.OnChanged( Valuek );
+			Control = Slider;
+		}
+		
+		ControlTop += ControlHeight;
+		ControlTop += ControlSpacing;
+		
+		
+		//	save objects
+		Window.Controls[Name] = Control;
+		Window.Labels[Name] = Label;
+	}
+	
+	
+	AddSlider('DepthMin',0,5000,Math.floor);
+	AddSlider('DepthMax',0,5000,Math.floor);
+		
+	return Window;
+}
+
+function SaveParams(Params)
+{
+	//
+}
+
+//	make params editor
+let ParamsEditor = CreateParamsWindow(Params,SaveParams);
+
+
 
