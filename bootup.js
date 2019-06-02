@@ -1,6 +1,14 @@
+Pop.Include = function(Filename)
+{
+	const Source = Pop.LoadFileAsString(Filename);
+	return Pop.CompileAndRun( Source, Filename );
+}
+
+
 let VertShader = Pop.LoadFileAsString('Quad.vert.glsl');
 let BlitFragShader = Pop.LoadFileAsString('Blit.frag.glsl');
 
+Pop.Include('TFrameCounter.js');
 
 Pop.CreateColourTexture = function(Colour4)
 {
@@ -14,6 +22,17 @@ let InputImage = Pop.CreateColourTexture([255,0,0,255]);
 let OutputImage = Pop.CreateColourTexture([0,255,0,255]);
 const Encoder = new Pop.Media.H264Encoder();
 let BlitShader = null;
+let InputCounter = new TFrameCounter("Kinect input");
+let EncodeCounter = new TFrameCounter("H264 encodes");
+let H264ByteCounter = new TFrameCounter("H264 bytes");
+let RenderCounter = new TFrameCounter("Render");
+
+
+H264ByteCounter.Report = function(CountPerSec)
+{
+	let KbSec = CountPerSec / 1024;
+	Pop.Debug( this.CounterName + " " + KbSec.toFixed(2) + "kb/sec");
+}
 
 function Render(RenderTarget)
 {
@@ -37,6 +56,8 @@ function Render(RenderTarget)
 		Shader.SetUniform("Texture", OutputImage );
 	}
 	RenderTarget.DrawQuad( FragShader, DrawRight_SetUniforms );
+
+	RenderCounter.Add(1);
 }
 
 function BroadcastH264Packet(Packet)
@@ -53,6 +74,9 @@ async function ProcessEncoding()
 		const Packet = await Encoder.GetNextPacket();
 		if ( !Packet )
 			continue;
+
+		EncodeCounter.Add(1);
+		H264ByteCounter.Add(Packet.length);
 	
 		//	send packet over network
 		BroadcastH264Packet( Packet );
@@ -94,6 +118,8 @@ async function ProcessKinectFrames(CameraSource)
 			if ( !NextFrame )
 				continue;
 			
+			InputCounter.Add(1);
+
 			//InputImage = NextFrame;
 			//	convert from kinect to something we can send			
 			let YuvFrame = new Pop.Image();
