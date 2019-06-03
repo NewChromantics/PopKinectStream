@@ -115,6 +115,8 @@ function GetKinect8Bit(Depth16Image)
 	return Depth8Image;
 }
 
+let FirstPackets = [];
+let PeerInitialised = [];
 function BroadcastH264Packet(Packet)
 {
 	//	need to buffer up packets here so SPS & PPS get sent
@@ -122,8 +124,23 @@ function BroadcastH264Packet(Packet)
 	if ( !WebsocketServer )
 		return;
 
+	//	buffer up initial packets first (to make code simpler)
+	//	todo: store SPS/PPS only, and then the last keyframe
+	if ( FirstPackets.length < 10 )
+	{
+		FirstPackets.push(Packet);
+		return;
+	}
+
 	let SendToPeer = function(Peer)
 	{
+		//	if this is a new peer, send the first packets first
+		if ( PeerInitialised[Peer] !== true )
+		{
+			FirstPackets.forEach( p => WebsocketServer.Send( Peer, p ) );
+			PeerInitialised[Peer] = true;
+		}		
+
 		WebsocketServer.Send( Peer, Packet );
 	}
 	let Peers = WebsocketServer.GetPeers();
