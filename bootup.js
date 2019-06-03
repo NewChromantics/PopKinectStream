@@ -27,6 +27,8 @@ let EncodeCounter = new TFrameCounter("H264 encodes");
 let H264ByteCounter = new TFrameCounter("H264 bytes");
 let RenderCounter = new TFrameCounter("Render");
 
+var WebsocketServer = null;
+
 var Params = {};
 Params.DepthMin = 10;
 Params.DepthMax = 1000;
@@ -115,6 +117,17 @@ function GetKinect8Bit(Depth16Image)
 
 function BroadcastH264Packet(Packet)
 {
+	//	need to buffer up packets here so SPS & PPS get sent
+	//	we should grab an initial set of header packets for new connections
+	if ( !WebsocketServer )
+		return;
+
+	let SendToPeer = function(Peer)
+	{
+		WebsocketServer.Send( Peer, Packet );
+	}
+	let Peers = WebsocketServer.GetPeers();
+	Peers.forEach( SendToPeer );
 }
 
 async function ProcessEncoding()
@@ -287,7 +300,48 @@ function SaveParams(Params)
 }
 
 //	make params editor
-let ParamsEditor = CreateParamsWindow(Params,SaveParams);
+const ParamsEditor = CreateParamsWindow(Params,SaveParams);
 
+//	gr: this shoulod be async in case we have trouble creating ports
+function CreateWebsocketServer(Ports)
+{
+	let Try = 0;
+	while(true)
+	{
+		let Port = Ports[Try%Ports.length];
+		Try++;
+		try
+		{
+			let Server = new Pop.Websocket.Server(Port);
+			Pop.Debug("Created websocket server at " + JSON.stringify(Server.GetAddress()) );
+			return Server;
+		}
+		catch(Exception)
+		{
+			Pop.Debug("Creating websocket on " + Port + " failed; " + Exception);
+			//	todo: sleep here!
+		}
+	}
+}
 
+const BroadcastServer = new UdpBroadcastServer(9999);
+const WebsocketPorts = [8888,8887,8886,8885,8884,8883];
+WebsocketServer = CreateWebsocketServer(WebsocketPorts);
+
+function GetBroadcastMessage()
+{
+	let AddressObject = {};
+	AddressObject.Addresses = [];
+	let AddrInfo = WebsocketServer.GetAddress();
+	AddrInfo.forEach( Addr => AddressObject.Addresses.push( Addr.Address ) );
+	let MessageOut = JSON.stringify(AddressObject);
+	return MessageOut;
+}
+Pop.Debug(GetBroadcastMessage());
+
+BroadcastServer.OnMessage = function(MessageIn,Sender)
+{
+	let MessageOut = GetBroadcastMessage();
+	BroadcastServer.Send( Sender, MessageOut );
+}
 
