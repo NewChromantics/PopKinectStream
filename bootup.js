@@ -27,6 +27,9 @@ let EncodeCounter = new TFrameCounter("H264 encodes");
 let H264ByteCounter = new TFrameCounter("H264 bytes");
 let RenderCounter = new TFrameCounter("Render");
 
+//	allow no rendering for the weaker machines
+var EnableRender = true;
+
 var WebsocketServer = null;
 
 var Params = {};
@@ -63,6 +66,12 @@ H264ByteCounter.Report = function(CountPerSec)
 
 function Render(RenderTarget)
 {
+	if ( !EnableRender )
+	{
+		//RenderTarget.Clear(0,255,255);
+		return;
+	}
+
 	const ShaderSource = BlitFragShader;
 	if ( !BlitShader )
 	{
@@ -87,7 +96,7 @@ function Render(RenderTarget)
 	RenderCounter.Add(1);
 }
 
-function GetKinect8Bit(Depth16Image)
+function GetKinect8Bit(Depth16Image,Depth8Image)
 {
 	//Pop.Debug(Depth16Image.GetFormat(),Depth16Image.GetWidth(),Depth16Image.GeHeight());
 	if ( Depth16Image.GetFormat() != 'KinectDepth' )
@@ -110,7 +119,8 @@ function GetKinect8Bit(Depth16Image)
 		Depth8[i] = Depth;
 	}
 
-	const Depth8Image = new Pop.Image();
+	if ( !Depth8Image )
+		Depth8Image = new Pop.Image();
 	Depth8Image.WritePixels( w, h, Depth8, 'Greyscale' );
 	return Depth8Image;
 }
@@ -162,7 +172,14 @@ async function ProcessEncoding()
 		H264ByteCounter.Add(Packet.length);
 	
 		//	send packet over network
-		BroadcastH264Packet( Packet );
+		try
+		{
+			BroadcastH264Packet( Packet );
+		}
+		catch(e)
+		{
+			Pop.Debug("BroadcastH264Packet Error",e);
+		}
 
 		//	decode to screen to debug
 		const ExtractPlanes = false;
@@ -178,7 +195,6 @@ async function ProcessEncoding()
 		{
 			//Pop.Debug("Output frame",Frame.GetFormat());
 			OutputImage = Frame;
-			//OutputImage.SetFormat('Greyscale');
 		}
 		
 	}
@@ -187,6 +203,7 @@ async function ProcessEncoding()
 async function ProcessKinectFrames(CameraSource)
 {
 	const FrameBuffer = new Pop.Image();
+	const Depth8 = new Pop.Image();
 	let FrameTime = 0;
 	//const FrameBuffer = undefined;
 	while ( true )
@@ -197,15 +214,15 @@ async function ProcessKinectFrames(CameraSource)
 			const fb = FrameBuffer;
 			const Stream = 0;
 			const Latest = true;
-			const NextFrame = await CameraSource.GetNextFrame( FrameBuffer, Stream, Latest );
+			const NextFrame = await CameraSource.GetNextFrame( fb, Stream, Latest );
 			if ( !NextFrame )
 				continue;
 			
 			InputCounter.Add(1);
 
-			InputImage = NextFrame;
+			//InputImage = NextFrame;
 			//	convert from kinect to something we can send			
-			let YuvFrame = GetKinect8Bit(NextFrame);
+			const YuvFrame = GetKinect8Bit(fb,Depth8);
 			InputImage = YuvFrame;
 			Encoder.Encode( YuvFrame, FrameTime++ );
 		}
@@ -226,7 +243,7 @@ ProcessEncoding().then(Pop.Debug).catch(Pop.Debug);
 let Window = new Pop.Opengl.Window("Kinect Stream");
 Window.OnRender = Render;
 Window.OnMouseMove = function(){};
-
+Window.OnMouseDown = function(){	EnableRender = !EnableRender;	}
 
 
 
@@ -373,3 +390,35 @@ BroadcastServer.OnMessage = function(MessageIn,Sender)
 	BroadcastServer.Send( Sender, MessageOut );
 }
 
+
+
+let MemCheckLoop = async function()
+{
+	while(true)
+	{
+		try
+		{
+			await Pop.Yield(1000);
+			Pop.GarbageCollect();
+		
+			let Debug = "Memory: ";
+			
+			const ImageHeapSize = (Pop.GetImageHeapSize() / 1024 / 1024).toFixed(2) + "mb";
+			const ImageHeapCount = Pop.GetImageHeapCount();
+			Debug += " ImageHeapSize="+ImageHeapSize+" x" + ImageHeapCount;
+			
+			const GeneralHeapSize = (Pop.GetHeapSize() / 1024 / 1024).toFixed(2) + "mb";
+			const GeneralHeapCount = Pop.GetHeapCount();
+			Debug += " GeneralHeapSize="+GeneralHeapSize+" x" + GeneralHeapCount;
+			
+			Debug += JSON.stringify(Pop.GetHeapObjects());
+			Pop.Debug(Debug);
+			Debug = null;
+		}
+		catch(e)
+		{
+			Pop.Debug("Loop Error: " + e );
+		}
+	}
+}
+MemCheckLoop();
