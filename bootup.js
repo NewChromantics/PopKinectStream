@@ -350,11 +350,22 @@ function GetBroadcastMessage()
 	let AddressObject = {};
 	AddressObject.Addresses = [];
 	let AddrInfo = WebsocketServer.GetAddress();
-	AddrInfo.forEach( Addr => AddressObject.Addresses.push( Addr.Address ) );
+
+	let PushAddress = function(Addr)
+	{
+		let Address = Addr.Address;
+		//	ignore local/incomplete ip's
+		if ( Address.startsWith('localhost') )	return;
+		if ( Address.startsWith('127.0.0.1') )	return;
+		if ( Address.startsWith('169.254.') )	return;	//	unconfigured/no dhcp device
+		AddressObject.Addresses.push( Address );
+	}
+
+	AddrInfo.forEach( PushAddress);
 	let MessageOut = JSON.stringify(AddressObject);
 	return MessageOut;
 }
-Pop.Debug(GetBroadcastMessage());
+Pop.Debug("GetBroadcastMessage",GetBroadcastMessage());
 
 BroadcastServer.OnMessage = function(MessageIn,Sender)
 {
