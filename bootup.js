@@ -6,7 +6,7 @@ Pop.Include = function(Filename)
 
 
 let VertShader = Pop.LoadFileAsString('Quad.vert.glsl');
-let BlitFragShader = Pop.LoadFileAsString('Blit.frag.glsl');
+let BlitFragShader = Pop.LoadFileAsString('BlitKinect8.frag.glsl');
 
 Pop.Include('TFrameCounter.js');
 
@@ -20,7 +20,7 @@ Pop.CreateColourTexture = function(Colour4)
 
 let InputImage = Pop.CreateColourTexture([255,0,0,255]);
 let OutputImage = Pop.CreateColourTexture([0,255,0,255]);
-const Encoder = new Pop.Media.H264Encoder();
+const Encoder = new Pop.Media.H264Encoder(2);
 let BlitShader = null;
 let InputCounter = new TFrameCounter("Kinect input");
 let EncodeCounter = new TFrameCounter("H264 encodes");
@@ -35,6 +35,8 @@ var WebsocketServer = null;
 var Params = {};
 Params.DepthMin = 10;
 Params.DepthMax = 1000;
+Params.PixelNear = 0; 
+Params.PixelFar = 255; 
 
 Math.clamp = function(min, max,Value)
 {
@@ -83,6 +85,8 @@ function Render(RenderTarget)
 	{
 		Shader.SetUniform("VertexRect", [0,0,0.5,1] );
 		Shader.SetUniform("Texture", InputImage );
+		Shader.SetUniform("NearMax", Params.PixelNear );
+		Shader.SetUniform("FarMin", Params.PixelFar );
 	}
 	RenderTarget.DrawQuad( FragShader, DrawLeft_SetUniforms );
 
@@ -90,6 +94,8 @@ function Render(RenderTarget)
 	{
 		Shader.SetUniform("VertexRect", [0.5,0,0.5,1] );
 		Shader.SetUniform("Texture", OutputImage );
+		Shader.SetUniform("NearMax", Params.PixelNear );
+		Shader.SetUniform("FarMin", Params.PixelFar );
 	}
 	RenderTarget.DrawQuad( FragShader, DrawRight_SetUniforms );
 
@@ -252,14 +258,18 @@ function CreateParamsWindow(Params,OnAnyChanged)
 {
 	OnAnyChanged = OnAnyChanged || function(){};
 	
-	let WindowRect = [20,20,100,400];
+	let WindowRect = [20,20,500,300];
 	let ControlTop = 10;
-	const ControlLeft = 10;
-	const ControlWidth = 400;
-	const ControlHeight = 20;
+
+	const LabelLeft = 10;
+	const LabelWidth = 100;
+	const LabelHeight = 28;
+	const ControlLeft = LabelLeft + LabelWidth + 10;
+	const ControlWidth = WindowRect[2] - ControlLeft - 20;
+	const ControlHeight = LabelHeight;
 	const ControlSpacing = 10;
 
-	let Window = new Pop.Gui.Window("Params");
+	let Window = new Pop.Gui.Window("Params",{},WindowRect);
 	Window.Controls = [];
 	Window.Labels = [];
 
@@ -268,8 +278,8 @@ function CreateParamsWindow(Params,OnAnyChanged)
 		if ( !CleanValue )
 			CleanValue = function(v)	{	return v;	}
 			
-		let Label = new Pop.Gui.Label( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight] );
-		ControlTop += ControlHeight;
+		let LabelTop = ControlTop;
+		let Label = new Pop.Gui.Label( Window, [LabelLeft,LabelTop,LabelWidth,LabelHeight] );
 		
 		let Control;
 		if ( typeof Params[Name] === 'boolean' )
@@ -290,15 +300,16 @@ function CreateParamsWindow(Params,OnAnyChanged)
 		}
 		else
 		{
+			const TickScalar = (CleanValue===Math.floor) ? Max : 1000;
 			let Slider = new Pop.Gui.Slider( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight] );
-			Slider.SetMinMax( 0, 1000 );
+			Slider.SetMinMax( 0, TickScalar );
 			let Valuef = Math.range( Min, Max, Params[Name] );
-			let Valuek = Valuef * 1000;
+			let Valuek = Valuef * TickScalar;
 			Slider.SetValue( Valuek );
 			
 			Slider.OnChanged = function(Valuek)
 			{
-				let Valuef = Valuek/1000;
+				let Valuef = Valuek/TickScalar;
 				let Value = Math.lerp( Min, Max, Valuef );
 				Value = CleanValue(Value);
 				Params[Name] = Value;
@@ -320,11 +331,14 @@ function CreateParamsWindow(Params,OnAnyChanged)
 		Window.Controls[Name] = Control;
 		Window.Labels[Name] = Label;
 	}
+
 	
 	
 	AddSlider('DepthMin',0,5000,Math.floor);
 	AddSlider('DepthMax',0,5000,Math.floor);
-		
+	AddSlider('PixelNear',0,255,Math.floor);
+	AddSlider('PixelFar',0,255,Math.floor);
+	
 	return Window;
 }
 
