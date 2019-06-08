@@ -33,10 +33,10 @@ var EnableRender = true;
 var WebsocketServer = null;
 
 var Params = {};
-Params.DepthMin = 10;
-Params.DepthMax = 1000;
-Params.PixelNear = 0; 
-Params.PixelFar = 255; 
+Params.DepthMin = 500;
+Params.DepthMax = 4500;
+Params.PixelNear = 5; 
+Params.PixelFar = 247; 
 
 Math.clamp = function(min, max,Value)
 {
@@ -224,6 +224,8 @@ async function ProcessKinectFrames(CameraSource)
 			if ( !NextFrame )
 				continue;
 			
+			Pop.Debug("Meta", JSON.stringify(NextFrame.Meta) );
+
 			InputCounter.Add(1);
 
 			//InputImage = NextFrame;
@@ -265,11 +267,12 @@ function CreateParamsWindow(Params,OnAnyChanged)
 	const LabelWidth = 100;
 	const LabelHeight = 28;
 	const ControlLeft = LabelLeft + LabelWidth + 10;
-	const ControlWidth = WindowRect[2] - ControlLeft - 20;
+	const ControlWidth = WindowRect[2] - ControlLeft - 40;
 	const ControlHeight = LabelHeight;
 	const ControlSpacing = 10;
 
-	let Window = new Pop.Gui.Window("Params",{},WindowRect);
+	let Window = new Pop.Gui.Window("Params",WindowRect,false);
+	Window.EnableScrollbars(false,true);
 	Window.Controls = [];
 	Window.Labels = [];
 
@@ -301,7 +304,8 @@ function CreateParamsWindow(Params,OnAnyChanged)
 		else
 		{
 			const TickScalar = (CleanValue===Math.floor) ? Max : 1000;
-			let Slider = new Pop.Gui.Slider( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight] );
+			const Notches = (CleanValue===Math.floor) ? Max : false;
+			let Slider = new Pop.Gui.Slider( Window, [ControlLeft,ControlTop,ControlWidth,ControlHeight], Notches );
 			Slider.SetMinMax( 0, TickScalar );
 			let Valuef = Math.range( Min, Max, Params[Name] );
 			let Valuek = Valuef * TickScalar;
