@@ -21,6 +21,7 @@ Pop.CreateColourTexture = function(Colour4)
 let InputImage = Pop.CreateColourTexture([255,0,0,255]);
 let OutputImage = Pop.CreateColourTexture([0,255,0,255]);
 const Encoder = new Pop.Media.H264Encoder(2);
+let EncodeMetas = [];
 let BlitShader = null;
 let InputCounter = new TFrameCounter("Kinect input");
 let EncodeCounter = new TFrameCounter("H264 encodes");
@@ -148,16 +149,26 @@ function BroadcastH264Packet(Packet)
 		return;
 	}
 
+	let SendPacket = function(Peer,NextPacket)
+	{
+		//Pop.Debug("Time=", JSON.stringify(NextPacket.Time));
+		//Pop.Debug("Meta=", JSON.stringify(NextPacket.Meta));
+		//Pop.Debug("Data=x", NextPacket.Data.length );
+		if ( NextPacket.Meta !== undefined )
+			WebsocketServer.Send( Peer, JSON.stringify(NextPacket.Meta) );
+		WebsocketServer.Send( Peer, NextPacket.Data );
+	}
+
 	let SendToPeer = function(Peer)
 	{
 		//	if this is a new peer, send the first packets first
 		if ( PeerInitialised[Peer] !== true )
 		{
-			FirstPackets.forEach( p => WebsocketServer.Send( Peer, p ) );
+			FirstPackets.forEach( p => SendPacket( Peer, p ) );
 			PeerInitialised[Peer] = true;
 		}		
 
-		WebsocketServer.Send( Peer, Packet );
+		SendPacket( Peer, Packet );
 	}
 	let Peers = WebsocketServer.GetPeers();
 	Peers.forEach( SendToPeer );
@@ -175,7 +186,14 @@ async function ProcessEncoding()
 			continue;
 
 		EncodeCounter.Add(1);
-		H264ByteCounter.Add(Packet.length);
+		H264ByteCounter.Add(Packet.Data.length);
+		const Meta = EncodeMetas[Packet.Time];
+		//Pop.Debug("Packet.Time",Packet.Time);
+		//EncodeMetas.splice(Packet.Time, 1);
+		//	delete when popped so meta only sent for first packet
+		delete EncodeMetas[Packet.Time];
+		//Pop.Debug( Object.keys(EncodeMetas) );
+		Packet.Meta = Meta;
 	
 		//	send packet over network
 		try
@@ -189,7 +207,7 @@ async function ProcessEncoding()
 
 		//	decode to screen to debug
 		const ExtractPlanes = false;
-		const Frames = await Decoder.Decode(Packet,ExtractPlanes);
+		const Frames = await Decoder.Decode(Packet.Data,ExtractPlanes);
 		//Pop.Debug(JSON.stringify(Frames));
 		if ( Frames.length == 0 )
 			continue;
@@ -224,15 +242,26 @@ async function ProcessKinectFrames(CameraSource)
 			if ( !NextFrame )
 				continue;
 			
-			Pop.Debug("Meta", JSON.stringify(NextFrame.Meta) );
+			//Pop.Debug("Meta", JSON.stringify(NextFrame.Meta) );
 
+			const Meta = NextFrame.Meta || {};
+			
 			InputCounter.Add(1);
 
 			//InputImage = NextFrame;
 			//	convert from kinect to something we can send			
 			const YuvFrame = GetKinect8Bit(fb,Depth8);
 			InputImage = YuvFrame;
-			Encoder.Encode( YuvFrame, FrameTime++ );
+
+			//	add some extra meta
+			Meta.FrameIndex = FrameTime;
+			Meta.DepthMin = Params.DepthMin;
+			Meta.DepthMax = Params.DepthMax;
+			
+
+			EncodeMetas[FrameTime] = Meta;
+			Encoder.Encode( YuvFrame, FrameTime );
+			FrameTime++;
 		}
 		catch(e)
 		{
