@@ -6,9 +6,12 @@ Pop.Include = function(Filename)
 
 
 let VertShader = Pop.LoadFileAsString('Quad.vert.glsl');
-let BlitFragShader = Pop.LoadFileAsString('BlitKinect8.frag.glsl');
+let Blit_Kinect_Shader = Pop.LoadFileAsString('BlitKinect8.frag.glsl');
+let Blit_Yuv8_8_8Shader = Pop.LoadFileAsString('Blit_Yuv8_8_8.frag.glsl');
 
 Pop.Include('TFrameCounter.js');
+Pop.Include('StreamEncoder.js');
+Pop.Include('PopShaderCache.js');
 
 Pop.CreateColourTexture = function(Colour4)
 {
@@ -18,11 +21,7 @@ Pop.CreateColourTexture = function(Colour4)
 }
 
 
-let InputImage = Pop.CreateColourTexture([255,0,0,255]);
-let OutputImage = Pop.CreateColourTexture([0,255,0,255]);
-const Encoder = new Pop.Media.H264Encoder(2);
-let EncodeMetas = [];
-let BlitShader = null;
+let Shaders = [];
 let InputCounter = new TFrameCounter("Kinect input");
 let EncodeCounter = new TFrameCounter("H264 encodes");
 let H264ByteCounter = new TFrameCounter("H264 bytes");
@@ -67,7 +66,7 @@ H264ByteCounter.Report = function(CountPerSec)
 	Pop.Debug( this.CounterName + " " + KbSec.toFixed(2) + "kb/sec");
 }
 
-function Render(RenderTarget)
+function RenderDepth(RenderTarget)
 {
 	if ( !EnableRender )
 	{
@@ -75,17 +74,18 @@ function Render(RenderTarget)
 		return;
 	}
 
-	const ShaderSource = BlitFragShader;
-	if ( !BlitShader )
-	{
-		BlitShader = new Pop.Opengl.Shader( RenderTarget, VertShader, BlitFragShader );
-	}
-	const FragShader = BlitShader;
-		
+	const InputImage = this.InputImage;
+	const OutputImage = this.OutputImage;
+
+
+	const ShaderSource = InputImage.GetFormat() == 'Greyscale' ? Blit_Kinect_Shader : Blit_Yuv8_8_8Shader;
+	const FragShader = Pop.GetShader(RenderTarget,ShaderSource);
+	Pop.Debug(InputImage.GetFormat());
 	const DrawLeft_SetUniforms = function(Shader)
 	{
 		Shader.SetUniform("VertexRect", [0,0,0.5,1] );
 		Shader.SetUniform("Texture", InputImage );
+		Shader.SetUniform("Yuv_8_8_8_Texture", InputImage );
 		Shader.SetUniform("NearMax", Params.PixelNear );
 		Shader.SetUniform("FarMin", Params.PixelFar );
 	}
@@ -95,6 +95,7 @@ function Render(RenderTarget)
 	{
 		Shader.SetUniform("VertexRect", [0.5,0,0.5,1] );
 		Shader.SetUniform("Texture", OutputImage );
+		Shader.SetUniform("Yuv_8_8_8_Texture", OutputImage );
 		Shader.SetUniform("NearMax", Params.PixelNear );
 		Shader.SetUniform("FarMin", Params.PixelFar );
 	}
@@ -174,7 +175,7 @@ function BroadcastH264Packet(Packet)
 	Peers.forEach( SendToPeer );
 }
 
-async function ProcessEncoding()
+async function ProcessEncoding(Encoder,OnOutputImageChanged)
 {
 	const Decoder = new Pop.Media.AvcDecoder();
 
@@ -187,11 +188,11 @@ async function ProcessEncoding()
 
 		EncodeCounter.Add(1);
 		H264ByteCounter.Add(Packet.Data.length);
-		const Meta = EncodeMetas[Packet.Time];
+		const Meta = Encoder.Metas[Packet.Time];
 		//Pop.Debug("Packet.Time",Packet.Time);
 		//EncodeMetas.splice(Packet.Time, 1);
 		//	delete when popped so meta only sent for first packet
-		delete EncodeMetas[Packet.Time];
+		delete Encoder.Metas[Packet.Time];
 		//Pop.Debug( Object.keys(EncodeMetas) );
 		Packet.Meta = Meta;
 	
@@ -218,13 +219,12 @@ async function ProcessEncoding()
 		if ( Frame )
 		{
 			//Pop.Debug("Output frame",Frame.GetFormat());
-			OutputImage = Frame;
-		}
-		
+			OnOutputImageChanged(Frame);
+		}		
 	}
 }
 
-async function ProcessKinectFrames(CameraSource)
+async function ProcessKinectFrames(CameraSource,Encoder,FramePostProcess,OnInputImageChanged)
 {
 	const FrameBuffer = new Pop.Image();
 	const Depth8 = new Pop.Image();
@@ -248,10 +248,9 @@ async function ProcessKinectFrames(CameraSource)
 			
 			InputCounter.Add(1);
 
-			//InputImage = NextFrame;
 			//	convert from kinect to something we can send			
-			const YuvFrame = GetKinect8Bit(fb,Depth8);
-			InputImage = YuvFrame;
+			const YuvFrame = FramePostProcess(fb,Depth8);
+			OnInputImageChanged(YuvFrame);
 
 			//	add some extra meta
 			Meta.FrameIndex = FrameTime;
@@ -259,7 +258,7 @@ async function ProcessKinectFrames(CameraSource)
 			Meta.DepthMax = Params.DepthMax;
 			
 
-			EncodeMetas[FrameTime] = Meta;
+			Encoder.Metas[FrameTime] = Meta;
 			Encoder.Encode( YuvFrame, FrameTime );
 			FrameTime++;
 		}
@@ -273,14 +272,6 @@ async function ProcessKinectFrames(CameraSource)
 	}
 }
 
-let Kinect = new Pop.Media.Source("Kinect2:Default_Depth");
-ProcessKinectFrames(Kinect).then(Pop.Debug).catch(Pop.Debug);
-ProcessEncoding().then(Pop.Debug).catch(Pop.Debug);
-
-let Window = new Pop.Opengl.Window("Kinect Stream");
-Window.OnRender = Render;
-Window.OnMouseMove = function(){};
-Window.OnMouseDown = function(){	EnableRender = !EnableRender;	}
 
 
 
@@ -469,3 +460,50 @@ let MemCheckLoop = async function()
 	}
 }
 MemCheckLoop();
+
+function OnError(Error)
+{
+	Pop.Debug("Error",Error);
+}
+
+
+
+function ProcessColourFrame(Frame,OutputBuffer)
+{
+	//	YYuv_8888_Full to Yuv_8_8_8_Ntsc
+	if ( Frame.GetFormat() == 'YYuv_8888_Full' )
+	{
+		const yyuv = Frame.GetPixelBuffer();
+		let w = Frame.GetWidth();
+		let h = Frame.GetHeight();
+		let LumaSize = w*h;
+		let ChromaSize = (w/2)*(h/2);
+		let yuv_8_8_8 = new Uint8Array( LumaSize + ChromaSize + ChromaSize );
+		for ( let p=0;	p<yyuv.length/4;	p++ )
+		{
+			let Luma0 = yyuv[(p*4)+0];
+			let ChromaU = yyuv[(p*4)+1];
+			let Luma1 = yyuv[(p*4)+2];
+			let ChromaV = yyuv[(p*4)+3];
+
+			yuv_8_8_8[ (p*2)+0 ] = Luma0;
+			yuv_8_8_8[ (p*2)+1 ] = Luma1;
+			yuv_8_8_8[ LumaSize+p ] = ChromaU;
+			yuv_8_8_8[ LumaSize+ChromaSize+p ] = ChromaV;
+		}
+		if ( !OutputBuffer )
+			OutputBuffer = new Pop.Image();
+		OutputBuffer.WritePixels( Frame.GetWidth(), Frame.GetHeight(), yuv_8_8_8, 'Yuv_8_8_8_Ntsc' );
+		return OutputBuffer;
+	}
+
+
+	return Frame;
+}
+
+Pop.Media.EnumDevices().then( Devices => Pop.Debug("Devices:",Devices) ).catch(OnError);
+
+//let DepthStream = new TStreamEncoder("Kinect2:Default_Depth","Depth",GetKinect8Bit,RenderDepth,OnError);
+//let ColourStream = new TStreamEncoder("Kinect V2 Video Sensor","Colour",ProcessColourFrame,RenderDepth,OnError);
+let ColourStream = new TStreamEncoder("Display iSight","Colour",ProcessColourFrame,RenderDepth,OnError);
+
