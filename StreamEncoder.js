@@ -1,8 +1,10 @@
 
 
 
-function TStreamEncoder(DeviceName,StreamName,FramePostProcess,RenderFunc,OnError)
+function TStreamEncoder(DeviceName,StreamName,FramePostProcess,RenderFunc,OnFirstMeta,OnError)
 {
+	OnFirstMeta = OnFirstMeta || function(){};
+	
 	const EncodeQuality = 2;
 
 	this.Device = new Pop.Media.Source(DeviceName);
@@ -27,6 +29,6 @@ function TStreamEncoder(DeviceName,StreamName,FramePostProcess,RenderFunc,OnErro
 		this.OutputImage = NewImage;
 	}
 
-	ProcessKinectFrames(this.Device, this.Encoder, FramePostProcess, this.OnInputImageChanged.bind(this) ).then(Pop.Debug).catch(OnError);
+	ProcessKinectFrames(this.Device, this.Encoder, FramePostProcess, this.OnInputImageChanged.bind(this), OnFirstMeta.bind(this) ).then(Pop.Debug).catch(OnError);
 	ProcessEncoding(this.Encoder,this.OnOutputImageChanged.bind(this)).then(Pop.Debug).catch(OnError);
 }

@@ -80,7 +80,7 @@ function RenderDepth(RenderTarget)
 
 	const ShaderSource = InputImage.GetFormat() == 'Greyscale' ? Blit_Kinect_Shader : Blit_Yuv8_8_8Shader;
 	const FragShader = Pop.GetShader(RenderTarget,ShaderSource);
-	Pop.Debug(InputImage.GetFormat());
+	//Pop.Debug(InputImage.GetFormat());
 	const DrawLeft_SetUniforms = function(Shader)
 	{
 		Shader.SetUniform("VertexRect", [0,0,0.5,1] );
@@ -107,8 +107,8 @@ function RenderDepth(RenderTarget)
 function GetKinect8Bit(Depth16Image,Depth8Image)
 {
 	//Pop.Debug(Depth16Image.GetFormat(),Depth16Image.GetWidth(),Depth16Image.GeHeight());
-	if ( Depth16Image.GetFormat() != 'KinectDepth' )
-		throw "Expected kinect depth, but format is " + Depth16Image.GetFormat();
+	if ( Depth16Image.GetFormat() != 'KinectDepth' && Depth16Image.GetFormat() != 'FreenectDepthmm' )
+		throw "Expected KinectDepth, but format is " + Depth16Image.GetFormat();
 
 	const w = Depth16Image.GetWidth();
 	const h = Depth16Image.GetHeight();
@@ -224,11 +224,13 @@ async function ProcessEncoding(Encoder,OnOutputImageChanged)
 	}
 }
 
-async function ProcessKinectFrames(CameraSource,Encoder,FramePostProcess,OnInputImageChanged)
+async function ProcessKinectFrames(CameraSource,Encoder,FramePostProcess,OnInputImageChanged,OnFirstMeta)
 {
 	const FrameBuffer = new Pop.Image();
 	const Depth8 = new Pop.Image();
 	let FrameTime = 0;
+	let FirstFrame = true;
+	
 	//const FrameBuffer = undefined;
 	while ( true )
 	{
@@ -245,6 +247,12 @@ async function ProcessKinectFrames(CameraSource,Encoder,FramePostProcess,OnInput
 			//Pop.Debug("Meta", JSON.stringify(NextFrame.Meta) );
 
 			const Meta = NextFrame.Meta || {};
+			
+			if ( FirstFrame )
+			{
+				OnFirstMeta( Meta );
+				FirstFrame = false;
+			}
 			
 			InputCounter.Add(1);
 
@@ -284,7 +292,7 @@ function CreateParamsWindow(Params,OnAnyChanged)
 	let ControlTop = 10;
 
 	const LabelLeft = 10;
-	const LabelWidth = 100;
+	const LabelWidth = 120;
 	const LabelHeight = 28;
 	const ControlLeft = LabelLeft + LabelWidth + 10;
 	const ControlWidth = WindowRect[2] - ControlLeft - 40;
@@ -295,6 +303,21 @@ function CreateParamsWindow(Params,OnAnyChanged)
 	Window.EnableScrollbars(false,true);
 	Window.Controls = [];
 	Window.Labels = [];
+	
+	Window.OnParamChanged = function(Name)
+	{
+		if ( !this.Controls.hasOwnProperty(Name) )
+		{
+			Pop.Debug("Tried to change param " + Name + " but no control assigned");
+			return;
+		}
+		
+		let Control = this.Controls[Name];
+		let Value = Params[Name];
+		Pop.Debug("Updating control", JSON.stringify(Control), Value );
+		Control.SetValue( Value );
+		Control.OnChanged( Value );
+	}
 
 	let AddSlider = function(Name,Min,Max,CleanValue)
 	{
@@ -358,8 +381,8 @@ function CreateParamsWindow(Params,OnAnyChanged)
 
 	
 	
-	AddSlider('DepthMin',0,5000,Math.floor);
-	AddSlider('DepthMax',0,5000,Math.floor);
+	AddSlider('DepthMin',0,16000,Math.floor);
+	AddSlider('DepthMax',0,16000,Math.floor);
 	AddSlider('PixelNear',0,255,Math.floor);
 	AddSlider('PixelFar',0,255,Math.floor);
 	
@@ -459,7 +482,7 @@ let MemCheckLoop = async function()
 		}
 	}
 }
-MemCheckLoop();
+//MemCheckLoop();
 
 function OnError(Error)
 {
@@ -503,7 +526,28 @@ function ProcessColourFrame(Frame,OutputBuffer)
 
 Pop.Media.EnumDevices().then( Devices => Pop.Debug("Devices:",Devices) ).catch(OnError);
 
-//let DepthStream = new TStreamEncoder("Kinect2:Default_Depth","Depth",GetKinect8Bit,RenderDepth,OnError);
-//let ColourStream = new TStreamEncoder("Kinect V2 Video Sensor","Colour",ProcessColourFrame,RenderDepth,OnError);
-let ColourStream = new TStreamEncoder("Display iSight","Colour",ProcessColourFrame,RenderDepth,OnError);
+function OnDepthMeta(Meta)
+{
+	Pop.Debug("Depthmeta!",JSON.stringify(Meta));
+	
+	let Min = undefined;
+	let Max = Meta.DepthMax;
+
+	if ( Min !== undefined )
+	{
+		Params.DepthMin = Min;
+		ParamsEditor.OnParamChanged('DepthMin');
+	}
+	
+	if ( Max !== undefined )
+	{
+		Params.DepthMax = Max;
+		ParamsEditor.OnParamChanged('DepthMax');
+	}
+}
+
+//let DepthStream = new TStreamEncoder("Kinect2:Default_Depth","Depth",GetKinect8Bit,RenderDepth,OnDepthMeta,OnError);
+let DepthStream = new TStreamEncoder("Freenect:A22595W00862214A_Depth","Depth",GetKinect8Bit,RenderDepth,OnDepthMeta,OnError);
+//let ColourStream = new TStreamEncoder("Kinect V2 Video Sensor","Colour",ProcessColourFrame,RenderDepth,undefined,OnError);
+//let ColourStream = new TStreamEncoder("Display iSight","Colour",ProcessColourFrame,RenderDepth,undefined,OnError);
 
